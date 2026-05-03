@@ -13,6 +13,7 @@ from handlers.admin import (
     cmd_adduser,
     cmd_broadcast,
     cmd_listusers,
+    cmd_mylink,
     cmd_removeuser,
     cmd_resettraffic,
     cmd_userinfo,
@@ -59,6 +60,7 @@ def main() -> None:
     )
 
     # Admin commands
+    app.add_handler(CommandHandler("mylink", cmd_mylink))
     app.add_handler(CommandHandler("adduser", cmd_adduser))
     app.add_handler(CommandHandler("removeuser", cmd_removeuser))
     app.add_handler(CommandHandler("userinfo", cmd_userinfo))

@@ -386,3 +386,40 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"📣 Рассылка завершена: ✅ отправлено {sent}, ❌ ошибок {failed}."
     )
     logger.info("Admin %d broadcast to %d users (%d failed)", caller_id, sent, failed)
+
+
+# ── /mylink ───────────────────────────────────────────────────────────────────
+
+async def cmd_mylink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    caller_id = update.effective_user.id
+    if not _is_admin(caller_id):
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    # Если аргумент передан — используем его, иначе ищем в БД
+    if context.args:
+        marzban_username = context.args[0]
+    else:
+        db_user = await get_user(caller_id)
+        if not db_user:
+            await update.message.reply_text(
+                "Укажи marzban-юзернейм:\n`/mylink <marzban_username>`",
+                parse_mode="Markdown",
+            )
+            return
+        marzban_username = db_user["marzban_username"]
+
+    client: MarzbanClient = context.bot_data["marzban"]
+    try:
+        mu = await client.get_user(marzban_username)
+        sub_url = client.full_subscription_url(mu)
+        status = mu.get("status", "unknown")
+        text = (
+            f"🔑 *Ссылка для* `{marzban_username}`\n"
+            f"Статус: {_status_emoji(status)} {status}\n\n"
+            f"`{sub_url}`"
+        )
+        await update.message.reply_text(text, parse_mode="Markdown")
+    except Exception as exc:
+        logger.exception("Error in /mylink: %s", exc)
+        await update.message.reply_text(f"❌ Ошибка: {exc}")

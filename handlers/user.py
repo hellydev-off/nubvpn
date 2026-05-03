@@ -56,6 +56,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text(
                 "👋 *Добро пожаловать, администратор!*\n\n"
                 "Доступные команды:\n"
+                "/mylink — Моя ссылка на подписку\n"
                 "/adduser — Добавить пользователя\n"
                 "/removeuser — Удалить пользователя\n"
                 "/userinfo — Информация о пользователе\n"
