@@ -1,9 +1,12 @@
 import logging
 import math
 import os
+import re
 from datetime import datetime, timezone
 
 import httpx
+
+_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_-]{3,32}$")
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
@@ -76,6 +79,14 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     marzban_username = args[1]
     note = " ".join(args[2:]) if len(args) > 2 else ""
+
+    if not _USERNAME_RE.match(marzban_username):
+        await update.message.reply_text(
+            "❌ Некорректный marzban\\_username\\.\n"
+            "Допустимы только латинские буквы, цифры, `_` и `-`, от 3 до 32 символов\\.",
+            parse_mode="MarkdownV2",
+        )
+        return
 
     existing = await get_user(target_id)
     if existing:
