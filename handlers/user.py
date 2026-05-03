@@ -2,10 +2,10 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from db import get_user
+from db import get_user, mark_rules_seen
 from marzban import MarzbanClient
 
 logger = logging.getLogger(__name__)
@@ -24,6 +24,17 @@ _STATUS_EMOJI = {
 
 _NO_ACCESS = "❌ У вас нет доступа. Обратитесь к администратору."
 
+_RULES_TEXT = (
+    "📋 *Важно — прочитай перед использованием*\n\n"
+    "🔒 *1 ссылка = 1 человек*\n"
+    "Твоя ссылка привязана лично к тебе. Если ты передашь её кому-то ещё — "
+    "скорость и стабильность упадут у вас обоих. Не делай этого.\n\n"
+    "👥 *Хочешь подключить кого-то ещё?*\n"
+    "Напиши напрямую: @Hellylo — и я выдам отдельную ссылку.\n\n"
+    "📈 *Больше людей = лучше серверы*\n"
+    "Каждый новый пользователь помогает улучшать инфраструктуру для всех."
+)
+
 
 def _fmt_bytes(b: int | None) -> str:
     if not b:
@@ -32,17 +43,27 @@ def _fmt_bytes(b: int | None) -> str:
 
 
 def _fmt_limit(b: int | None) -> str:
-    return "Unlimited" if not b else _fmt_bytes(b)
+    return "Без лимита" if not b else _fmt_bytes(b)
 
 
 def _fmt_expire(ts: int | None) -> str:
     if ts is None:
-        return "Never"
+        return "Бессрочно"
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
 def _status_emoji(status: str) -> str:
     return _STATUS_EMOJI.get(status, "❓")
+
+
+def _welcome_text(note: str | None) -> str:
+    greeting = f"👋 Привет, *{note}*!" if note else "👋 Привет!"
+    return (
+        f"{greeting}\n\n"
+        "Доступные команды:\n"
+        "/sub — Получить ссылку на подписку VPN\n"
+        "/info — Информация об аккаунте"
+    )
 
 
 # ── /start ────────────────────────────────────────────────────────────────────
@@ -69,13 +90,34 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text(_NO_ACCESS)
         return
 
-    note = db_user.get("note")
-    greeting = f"👋 Привет, *{note}*!" if note else "👋 Привет!"
+    if not db_user.get("seen_rules"):
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Я понял", callback_data="rules_accepted")
+        ]])
+        await update.message.reply_text(
+            _RULES_TEXT,
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
+        return
+
     await update.message.reply_text(
-        f"{greeting}\n\n"
-        "Доступные команды:\n"
-        "/sub — Получить ссылку на подписку VPN\n"
-        "/info — Информация об аккаунте",
+        _welcome_text(db_user.get("note")), parse_mode="Markdown"
+    )
+
+
+# ── rules callback ────────────────────────────────────────────────────────────
+
+async def handle_rules_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("Отлично! Добро пожаловать 🎉")
+
+    user_id = query.from_user.id
+    await mark_rules_seen(user_id)
+
+    db_user = await get_user(user_id)
+    await query.edit_message_text(
+        _welcome_text(db_user.get("note") if db_user else None),
         parse_mode="Markdown",
     )
 

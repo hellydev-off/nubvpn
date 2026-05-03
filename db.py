@@ -14,9 +14,15 @@ async def init_db() -> None:
                 marzban_username TEXT NOT NULL,
                 added_by         INTEGER,
                 added_at         TEXT,
-                note             TEXT
+                note             TEXT,
+                seen_rules       INTEGER NOT NULL DEFAULT 0
             )
         """)
+        # migrate existing databases that don't have seen_rules yet
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN seen_rules INTEGER NOT NULL DEFAULT 0")
+        except Exception:
+            pass
         await db.commit()
 
 
@@ -75,6 +81,14 @@ async def count_users() -> int:
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             row = await cur.fetchone()
             return row[0] if row else 0
+
+
+async def mark_rules_seen(telegram_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET seen_rules = 1 WHERE telegram_id = ?", (telegram_id,)
+        )
+        await db.commit()
 
 
 async def get_users_page(offset: int, limit: int) -> list[dict[str, Any]]:

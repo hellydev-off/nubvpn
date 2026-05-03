@@ -20,7 +20,7 @@ from handlers.admin import (
     handle_list_callback,
     handle_remove_callback,
 )
-from handlers.user import cmd_info, cmd_start, cmd_sub
+from handlers.user import cmd_info, cmd_start, cmd_sub, handle_rules_callback
 from marzban import MarzbanClient
 
 logging.basicConfig(
@@ -74,6 +74,9 @@ def main() -> None:
     app.add_handler(CommandHandler("info", cmd_info))
 
     # Inline keyboard callbacks
+    app.add_handler(
+        CallbackQueryHandler(handle_rules_callback, pattern=r"^rules_accepted$")
+    )
     app.add_handler(
         CallbackQueryHandler(handle_remove_callback, pattern=r"^(confirm|cancel)_remove:\d+$")
     )
