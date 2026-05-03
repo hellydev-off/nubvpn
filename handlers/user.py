@@ -22,7 +22,7 @@ _STATUS_EMOJI = {
     "on_hold": "⏸",
 }
 
-_NO_ACCESS = "❌ You don't have access. Contact the administrator."
+_NO_ACCESS = "❌ У вас нет доступа. Обратитесь к администратору."
 
 
 def _fmt_bytes(b: int | None) -> str:
@@ -54,14 +54,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not db_user:
         if user_id in ADMIN_IDS:
             await update.message.reply_text(
-                "👋 *Welcome, admin!*\n\n"
-                "Available commands:\n"
-                "/adduser — Add a user\n"
-                "/removeuser — Remove a user\n"
-                "/userinfo — Show user details\n"
-                "/listusers — List all users\n"
-                "/resettraffic — Reset user traffic\n"
-                "/broadcast — Send message to all users",
+                "👋 *Добро пожаловать, администратор!*\n\n"
+                "Доступные команды:\n"
+                "/adduser — Добавить пользователя\n"
+                "/removeuser — Удалить пользователя\n"
+                "/userinfo — Информация о пользователе\n"
+                "/listusers — Список всех пользователей\n"
+                "/resettraffic — Сбросить трафик\n"
+                "/broadcast — Рассылка сообщения",
                 parse_mode="Markdown",
             )
         else:
@@ -69,12 +69,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     note = db_user.get("note")
-    greeting = f"👋 Hello, *{note}*!" if note else "👋 Hello!"
+    greeting = f"👋 Привет, *{note}*!" if note else "👋 Привет!"
     await update.message.reply_text(
         f"{greeting}\n\n"
-        "Available commands:\n"
-        "/sub — Get your VPN subscription link\n"
-        "/info — View your account status",
+        "Доступные команды:\n"
+        "/sub — Получить ссылку на подписку VPN\n"
+        "/info — Информация об аккаунте",
         parse_mode="Markdown",
     )
 
@@ -93,14 +93,14 @@ async def cmd_sub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         mu = await client.get_user(db_user["marzban_username"])
         sub_url = mu.get("subscription_url", "N/A")
         await update.message.reply_text(
-            f"Your subscription link:\n`{sub_url}`\n\n"
-            "_Copy this link and add it to your VPN client "
-            "(Hiddify, Streisand, v2rayNG, etc.)_",
+            f"Ваша ссылка на подписку:\n`{sub_url}`\n\n"
+            "_Скопируйте эту ссылку и добавьте в ваш VPN-клиент "
+            "(Hiddify, Streisand, v2rayNG и др.)_",
             parse_mode="Markdown",
         )
     except Exception as exc:
         logger.exception("Error in /sub for TG %d: %s", user_id, exc)
-        await update.message.reply_text(f"❌ Error retrieving subscription: {exc}")
+        await update.message.reply_text(f"❌ Ошибка при получении подписки: {exc}")
 
 
 # ── /info ─────────────────────────────────────────────────────────────────────
@@ -117,11 +117,11 @@ async def cmd_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         mu = await client.get_user(db_user["marzban_username"])
         status = mu.get("status", "unknown")
         text = (
-            f"{_status_emoji(status)} *Status:* {status}\n"
-            f"📊 *Traffic:* {_fmt_bytes(mu.get('used_traffic'))} / {_fmt_limit(mu.get('data_limit'))}\n"
-            f"📅 *Expires:* {_fmt_expire(mu.get('expire'))}"
+            f"{_status_emoji(status)} *Статус:* {status}\n"
+            f"📊 *Трафик:* {_fmt_bytes(mu.get('used_traffic'))} / {_fmt_limit(mu.get('data_limit'))}\n"
+            f"📅 *Истекает:* {_fmt_expire(mu.get('expire'))}"
         )
         await update.message.reply_text(text, parse_mode="Markdown")
     except Exception as exc:
         logger.exception("Error in /info for TG %d: %s", user_id, exc)
-        await update.message.reply_text(f"❌ Error retrieving account info: {exc}")
+        await update.message.reply_text(f"❌ Ошибка при получении данных аккаунта: {exc}")
