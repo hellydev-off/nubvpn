@@ -175,7 +175,7 @@ async def handle_request_submit(update: Update, context: ContextTypes.DEFAULT_TY
         f"👤 Имя: {user.full_name}\n"
         f"🔗 Username: {username_display}\n"
         f"🆔 Telegram ID: `{user.id}`\n\n"
-        f"Чтобы добавить: `/adduser {user.id} <marzban\\_username>`"
+        f"Чтобы добавить: `/adduser {user.id}`"
     )
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Принять", callback_data=f"req_accept:{user.id}"),

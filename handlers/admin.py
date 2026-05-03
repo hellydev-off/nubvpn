@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 
 from db import (
     add_user, count_users, get_all_users, get_pending_requests,
-    get_user, get_users_page, remove_user, update_request_status,
+    get_request, get_user, get_users_page, remove_user, update_request_status,
 )
 from marzban import MarzbanClient
 
@@ -67,9 +67,9 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     args = context.args
-    if not args or len(args) < 2:
+    if not args:
         await update.message.reply_text(
-            "Использование: `/adduser <telegram\\_id> <marzban\\_username> [заметка]`",
+            "Использование: `/adduser <telegram\\_id> [заметка]`",
             parse_mode="Markdown",
         )
         return
@@ -80,16 +80,14 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("❌ telegram\\_id должен быть числом.", parse_mode="Markdown")
         return
 
-    marzban_username = args[1]
-    note = " ".join(args[2:]) if len(args) > 2 else ""
+    note = " ".join(args[1:]) if len(args) > 1 else ""
 
-    if not _USERNAME_RE.match(marzban_username):
-        await update.message.reply_text(
-            "❌ Некорректный marzban\\_username\\.\n"
-            "Допустимы только латинские буквы, цифры, `_` и `-`, от 3 до 32 символов\\.",
-            parse_mode="MarkdownV2",
-        )
-        return
+    # derive marzban username from telegram username (requests table) or fallback
+    req = await get_request(target_id)
+    raw_username = (req or {}).get("tg_username") or f"id{target_id}"
+    marzban_username = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_username)[:32]
+    if len(marzban_username) < 3:
+        marzban_username = f"id{target_id}"
 
     existing = await get_user(target_id)
     if existing:
@@ -114,9 +112,11 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         sub_url = client.full_subscription_url(marzban_user)
         await add_user(target_id, marzban_username, caller_id, note)
 
+        tg_name = f"@{req['tg_username']}" if req and req.get("tg_username") else str(target_id)
         text = (
             f"✅ *Пользователь добавлен\\!*\n"
-            f"Telegram ID: `{target_id}`\n"
+            f"Telegram: {tg_name}\n"
+            f"ID: `{target_id}`\n"
             f"Marzban: `{marzban_username}`\n"
             f"Заметка: {note or '—'}\n\n"
             f"Ссылка на подписку:\n`{sub_url}`"
@@ -425,7 +425,7 @@ async def cmd_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"🔗 {username_display}\n"
             f"🆔 ID: `{req['telegram_id']}`\n"
             f"📅 {date}\n\n"
-            f"Добавить: `/adduser {req['telegram_id']} <marzban\\_username>`"
+            f"Добавить: `/adduser {req['telegram_id']}`"
         )
         keyboard = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Принять", callback_data=f"req_accept:{req['telegram_id']}"),
