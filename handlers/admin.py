@@ -97,7 +97,7 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             else:
                 raise
 
-        sub_url = marzban_user.get("subscription_url", "N/A")
+        sub_url = client.full_subscription_url(marzban_user)
         await add_user(target_id, marzban_username, caller_id, note)
 
         text = (

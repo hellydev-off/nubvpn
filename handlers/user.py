@@ -91,7 +91,7 @@ async def cmd_sub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     client: MarzbanClient = context.bot_data["marzban"]
     try:
         mu = await client.get_user(db_user["marzban_username"])
-        sub_url = mu.get("subscription_url", "N/A")
+        sub_url = client.full_subscription_url(mu)
         await update.message.reply_text(
             f"Ваша ссылка на подписку:\n`{sub_url}`\n\n"
             "_Скопируйте эту ссылку и добавьте в ваш VPN-клиент "

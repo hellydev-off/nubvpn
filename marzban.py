@@ -48,21 +48,34 @@ class MarzbanClient:
     async def get_user(self, username: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/user/{username}")
 
+    async def get_inbounds(self) -> dict[str, Any]:
+        return await self._request("GET", "/api/inbounds")
+
     async def create_user(
         self,
         username: str,
         data_limit: int = 0,
         expire: int | None = None,
     ) -> dict[str, Any]:
+        inbounds_data = await self.get_inbounds()
+        proxies = {proto: {} for proto in inbounds_data}
+        inbounds = {proto: [ib["tag"] for ib in ibs] for proto, ibs in inbounds_data.items()}
         payload: dict[str, Any] = {
             "username": username,
-            "proxies": {"vless": {}, "vmess": {}},
+            "proxies": proxies,
+            "inbounds": inbounds,
             "data_limit": data_limit,
             "expire": expire,
             "data_limit_reset_strategy": "no_reset",
             "status": "active",
         }
         return await self._request("POST", "/api/user", json=payload)
+
+    def full_subscription_url(self, user: dict[str, Any]) -> str:
+        sub = user.get("subscription_url", "")
+        if sub.startswith("http"):
+            return sub
+        return f"{self._base_url}{sub}"
 
     async def delete_user(self, username: str) -> None:
         await self._request("DELETE", f"/api/user/{username}")
