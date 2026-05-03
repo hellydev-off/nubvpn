@@ -18,7 +18,15 @@ async def init_db() -> None:
                 seen_rules       INTEGER NOT NULL DEFAULT 0
             )
         """)
-        # migrate existing databases that don't have seen_rules yet
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS requests (
+                telegram_id  INTEGER PRIMARY KEY,
+                tg_username  TEXT,
+                full_name    TEXT,
+                status       TEXT NOT NULL DEFAULT 'pending',
+                created_at   TEXT
+            )
+        """)
         try:
             await db.execute("ALTER TABLE users ADD COLUMN seen_rules INTEGER NOT NULL DEFAULT 0")
         except Exception:
@@ -81,6 +89,51 @@ async def count_users() -> int:
         async with db.execute("SELECT COUNT(*) FROM users") as cur:
             row = await cur.fetchone()
             return row[0] if row else 0
+
+
+async def create_request(telegram_id: int, tg_username: str | None, full_name: str | None) -> bool:
+    """Returns False if request already exists."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT status FROM requests WHERE telegram_id = ?", (telegram_id,)
+        ) as cur:
+            existing = await cur.fetchone()
+        if existing:
+            return False
+        await db.execute(
+            "INSERT INTO requests (telegram_id, tg_username, full_name, created_at) VALUES (?, ?, ?, ?)",
+            (telegram_id, tg_username, full_name, datetime.now(timezone.utc).isoformat()),
+        )
+        await db.commit()
+        return True
+
+
+async def get_request(telegram_id: int) -> dict[str, Any] | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM requests WHERE telegram_id = ?", (telegram_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def get_pending_requests() -> list[dict[str, Any]]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM requests WHERE status = 'pending' ORDER BY created_at ASC"
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
+
+
+async def update_request_status(telegram_id: int, status: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE requests SET status = ? WHERE telegram_id = ?", (status, telegram_id)
+        )
+        await db.commit()
 
 
 async def mark_rules_seen(telegram_id: int) -> None:

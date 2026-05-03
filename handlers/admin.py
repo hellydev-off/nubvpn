@@ -10,7 +10,10 @@ _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_-]{3,32}$")
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from db import add_user, count_users, get_all_users, get_user, get_users_page, remove_user
+from db import (
+    add_user, count_users, get_all_users, get_pending_requests,
+    get_user, get_users_page, remove_user, update_request_status,
+)
 from marzban import MarzbanClient
 
 logger = logging.getLogger(__name__)
@@ -397,6 +400,91 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"📣 Рассылка завершена: ✅ отправлено {sent}, ❌ ошибок {failed}."
     )
     logger.info("Admin %d broadcast to %d users (%d failed)", caller_id, sent, failed)
+
+
+# ── /requests ─────────────────────────────────────────────────────────────────
+
+async def cmd_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    caller_id = update.effective_user.id
+    if not _is_admin(caller_id):
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    pending = await get_pending_requests()
+    if not pending:
+        await update.message.reply_text("📭 Нет ожидающих заявок.")
+        return
+
+    await update.message.reply_text(f"📋 *Заявки на доступ ({len(pending)})*", parse_mode="Markdown")
+
+    for req in pending:
+        username_display = f"@{req['tg_username']}" if req["tg_username"] else "нет username"
+        date = (req.get("created_at") or "")[:10]
+        text = (
+            f"👤 *{req['full_name'] or 'Без имени'}*\n"
+            f"🔗 {username_display}\n"
+            f"🆔 ID: `{req['telegram_id']}`\n"
+            f"📅 {date}\n\n"
+            f"Добавить: `/adduser {req['telegram_id']} <marzban\\_username>`"
+        )
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Принять", callback_data=f"req_accept:{req['telegram_id']}"),
+            InlineKeyboardButton("❌ Отклонить", callback_data=f"req_reject:{req['telegram_id']}"),
+        ]])
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+
+
+async def handle_request_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    caller_id = query.from_user.id
+    if not _is_admin(caller_id):
+        await query.edit_message_text("⛔ Нет доступа.")
+        return
+
+    action, raw_id = query.data.split(":")
+    target_id = int(raw_id)
+
+    if action == "req_accept":
+        await update_request_status(target_id, "accepted")
+        await query.edit_message_text(
+            query.message.text + "\n\n✅ *Принято*",
+            parse_mode="Markdown",
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text=(
+                    "✅ *Ваша заявка принята!*\n\n"
+                    "Администратор скоро выдаст вам доступ. "
+                    "Следите за этим чатом — как только доступ будет готов, "
+                    "просто напишите /start"
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.warning("Failed to notify user %d on accept: %s", target_id, exc)
+        logger.info("Admin %d accepted request from TG %d", caller_id, target_id)
+
+    else:  # req_reject
+        await update_request_status(target_id, "rejected")
+        await query.edit_message_text(
+            query.message.text + "\n\n❌ *Отклонено*",
+            parse_mode="Markdown",
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text=(
+                    "❌ *Ваша заявка отклонена.*\n\n"
+                    "Если вы считаете это ошибкой — напишите @Hellylo."
+                ),
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.warning("Failed to notify user %d on reject: %s", target_id, exc)
+        logger.info("Admin %d rejected request from TG %d", caller_id, target_id)
 
 
 # ── /mylink ───────────────────────────────────────────────────────────────────

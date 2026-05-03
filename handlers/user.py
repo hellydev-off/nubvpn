@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from db import get_user, mark_rules_seen
+from db import create_request, get_request, get_user, mark_rules_seen
 from marzban import MarzbanClient
 
 logger = logging.getLogger(__name__)
@@ -78,6 +78,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 "👋 *Добро пожаловать, администратор!*\n\n"
                 "Доступные команды:\n"
                 "/mylink — Моя ссылка на подписку\n"
+                "/requests — Заявки на доступ\n"
                 "/adduser — Добавить пользователя\n"
                 "/removeuser — Удалить пользователя\n"
                 "/userinfo — Информация о пользователе\n"
@@ -87,7 +88,27 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 parse_mode="Markdown",
             )
         else:
-            await update.message.reply_text(_NO_ACCESS)
+            req = await get_request(user_id)
+            if req and req["status"] == "pending":
+                await update.message.reply_text(
+                    "⏳ Ваша заявка уже отправлена и ожидает рассмотрения.\n"
+                    "Мы уведомим вас о решении."
+                )
+            elif req and req["status"] == "rejected":
+                await update.message.reply_text(
+                    "❌ Ваша заявка была отклонена.\n"
+                    "Если вы считаете это ошибкой — напишите @Hellylo."
+                )
+            else:
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("📩 Подать заявку", callback_data="send_request")
+                ]])
+                await update.message.reply_text(
+                    "🔒 У вас нет доступа к боту.\n\n"
+                    "Хотите получить доступ? Нажмите кнопку ниже — "
+                    "администратор получит вашу заявку и рассмотрит её.",
+                    reply_markup=keyboard,
+                )
         return
 
     if not db_user.get("seen_rules"):
@@ -120,6 +141,56 @@ async def handle_rules_callback(update: Update, context: ContextTypes.DEFAULT_TY
         _welcome_text(db_user.get("note") if db_user else None),
         parse_mode="Markdown",
     )
+
+
+# ── request submit callback ───────────────────────────────────────────────────
+
+async def handle_request_submit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    created = await create_request(
+        telegram_id=user.id,
+        tg_username=user.username,
+        full_name=user.full_name,
+    )
+
+    if not created:
+        await query.edit_message_text(
+            "⏳ Ваша заявка уже отправлена и ожидает рассмотрения."
+        )
+        return
+
+    await query.edit_message_text(
+        "✅ Заявка отправлена!\n\n"
+        "Администратор получит уведомление и рассмотрит вашу заявку. "
+        "Мы сообщим вам о решении прямо в этот чат."
+    )
+
+    # notify all admins
+    username_display = f"@{user.username}" if user.username else "нет username"
+    admin_text = (
+        f"📩 *Новая заявка на доступ*\n\n"
+        f"👤 Имя: {user.full_name}\n"
+        f"🔗 Username: {username_display}\n"
+        f"🆔 Telegram ID: `{user.id}`\n\n"
+        f"Чтобы добавить: `/adduser {user.id} <marzban\\_username>`"
+    )
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Принять", callback_data=f"req_accept:{user.id}"),
+        InlineKeyboardButton("❌ Отклонить", callback_data=f"req_reject:{user.id}"),
+    ]])
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=admin_text,
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+            )
+        except Exception as exc:
+            logger.warning("Failed to notify admin %d: %s", admin_id, exc)
 
 
 # ── /sub ──────────────────────────────────────────────────────────────────────

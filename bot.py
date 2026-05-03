@@ -15,12 +15,14 @@ from handlers.admin import (
     cmd_listusers,
     cmd_mylink,
     cmd_removeuser,
+    cmd_requests,
     cmd_resettraffic,
     cmd_userinfo,
     handle_list_callback,
     handle_remove_callback,
+    handle_request_action,
 )
-from handlers.user import cmd_info, cmd_start, cmd_sub, handle_rules_callback
+from handlers.user import cmd_info, cmd_start, cmd_sub, handle_rules_callback, handle_request_submit
 from marzban import MarzbanClient
 
 logging.basicConfig(
@@ -61,6 +63,7 @@ def main() -> None:
 
     # Admin commands
     app.add_handler(CommandHandler("mylink", cmd_mylink))
+    app.add_handler(CommandHandler("requests", cmd_requests))
     app.add_handler(CommandHandler("adduser", cmd_adduser))
     app.add_handler(CommandHandler("removeuser", cmd_removeuser))
     app.add_handler(CommandHandler("userinfo", cmd_userinfo))
@@ -76,6 +79,12 @@ def main() -> None:
     # Inline keyboard callbacks
     app.add_handler(
         CallbackQueryHandler(handle_rules_callback, pattern=r"^rules_accepted$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(handle_request_submit, pattern=r"^send_request$")
+    )
+    app.add_handler(
+        CallbackQueryHandler(handle_request_action, pattern=r"^req_(accept|reject):\d+$")
     )
     app.add_handler(
         CallbackQueryHandler(handle_remove_callback, pattern=r"^(confirm|cancel)_remove:\d+$")
