@@ -48,22 +48,16 @@ class MarzbanClient:
     async def get_user(self, username: str) -> dict[str, Any]:
         return await self._request("GET", f"/api/user/{username}")
 
-    async def get_inbounds(self) -> dict[str, Any]:
-        return await self._request("GET", "/api/inbounds")
-
     async def create_user(
         self,
         username: str,
         data_limit: int = 0,
         expire: int | None = None,
     ) -> dict[str, Any]:
-        inbounds_data = await self.get_inbounds()
-        proxies = {proto: {} for proto in inbounds_data}
-        inbounds = {proto: [ib["tag"] for ib in ibs] for proto, ibs in inbounds_data.items()}
         payload: dict[str, Any] = {
             "username": username,
-            "proxies": proxies,
-            "inbounds": inbounds,
+            "proxies": {"vless": {}},
+            "inbounds": {"vless": ["VLESS TCP REALITY"]},
             "data_limit": data_limit,
             "expire": expire,
             "data_limit_reset_strategy": "no_reset",
