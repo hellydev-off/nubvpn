@@ -18,6 +18,11 @@ from handlers.admin import (
     cmd_requests,
     cmd_resettraffic,
     cmd_userinfo,
+    handle_admin_broadcast_callback,
+    handle_admin_listusers_callback,
+    handle_admin_menu,
+    handle_admin_mylink_callback,
+    handle_admin_requests_callback,
     handle_list_callback,
     handle_remove_callback,
     handle_request_action,
@@ -77,21 +82,16 @@ def main() -> None:
     app.add_handler(CommandHandler("info", cmd_info))
 
     # Inline keyboard callbacks
-    app.add_handler(
-        CallbackQueryHandler(handle_rules_callback, pattern=r"^rules_accepted$")
-    )
-    app.add_handler(
-        CallbackQueryHandler(handle_request_submit, pattern=r"^send_request$")
-    )
-    app.add_handler(
-        CallbackQueryHandler(handle_request_action, pattern=r"^req_(accept|reject):\d+$")
-    )
-    app.add_handler(
-        CallbackQueryHandler(handle_remove_callback, pattern=r"^(confirm|cancel)_remove:\d+$")
-    )
-    app.add_handler(
-        CallbackQueryHandler(handle_list_callback, pattern=r"^listusers:page:\d+$")
-    )
+    app.add_handler(CallbackQueryHandler(handle_rules_callback,             pattern=r"^rules_accepted$"))
+    app.add_handler(CallbackQueryHandler(handle_request_submit,             pattern=r"^send_request$"))
+    app.add_handler(CallbackQueryHandler(handle_request_action,             pattern=r"^req_(accept|reject):\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_remove_callback,            pattern=r"^(confirm|cancel)_remove:\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_list_callback,              pattern=r"^listusers:page:\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_admin_menu,                 pattern=r"^admin_menu$"))
+    app.add_handler(CallbackQueryHandler(handle_admin_requests_callback,    pattern=r"^admin_requests$"))
+    app.add_handler(CallbackQueryHandler(handle_admin_listusers_callback,   pattern=r"^admin_listusers:\d+$"))
+    app.add_handler(CallbackQueryHandler(handle_admin_mylink_callback,      pattern=r"^admin_mylink$"))
+    app.add_handler(CallbackQueryHandler(handle_admin_broadcast_callback,   pattern=r"^admin_broadcast$"))
 
     logger.info("Bot starting…")
     app.run_polling(drop_pending_updates=True)

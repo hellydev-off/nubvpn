@@ -61,54 +61,62 @@ def _welcome_text(note: str | None) -> str:
     return (
         f"{greeting}\n\n"
         "Доступные команды:\n"
-        "/sub — Получить ссылку на подписку VPN\n"
+        "/sub — Получить VLESS конфиг\n"
         "/info — Информация об аккаунте"
     )
+
+
+def admin_menu_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📩 Заявки", callback_data="admin_requests"),
+            InlineKeyboardButton("👥 Пользователи", callback_data="admin_listusers:0"),
+        ],
+        [
+            InlineKeyboardButton("🔑 Моя ссылка", callback_data="admin_mylink"),
+            InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+        ],
+    ])
 
 
 # ── /start ────────────────────────────────────────────────────────────────────
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
+
+    # Admin check FIRST — regardless of whether they're in the users table
+    if user_id in ADMIN_IDS:
+        await update.message.reply_text(
+            "👋 *Панель администратора*\n\nВыберите действие:",
+            parse_mode="Markdown",
+            reply_markup=admin_menu_keyboard(),
+        )
+        return
+
     db_user = await get_user(user_id)
 
     if not db_user:
-        if user_id in ADMIN_IDS:
+        req = await get_request(user_id)
+        if req and req["status"] == "pending":
             await update.message.reply_text(
-                "👋 *Добро пожаловать, администратор!*\n\n"
-                "Доступные команды:\n"
-                "/mylink — Моя ссылка на подписку\n"
-                "/requests — Заявки на доступ\n"
-                "/adduser — Добавить пользователя\n"
-                "/removeuser — Удалить пользователя\n"
-                "/userinfo — Информация о пользователе\n"
-                "/listusers — Список всех пользователей\n"
-                "/resettraffic — Сбросить трафик\n"
-                "/broadcast — Рассылка сообщения",
-                parse_mode="Markdown",
+                "⏳ Ваша заявка уже отправлена и ожидает рассмотрения.\n"
+                "Мы уведомим вас о решении."
+            )
+        elif req and req["status"] == "rejected":
+            await update.message.reply_text(
+                "❌ Ваша заявка была отклонена.\n"
+                "Если вы считаете это ошибкой — напишите @Hellylo."
             )
         else:
-            req = await get_request(user_id)
-            if req and req["status"] == "pending":
-                await update.message.reply_text(
-                    "⏳ Ваша заявка уже отправлена и ожидает рассмотрения.\n"
-                    "Мы уведомим вас о решении."
-                )
-            elif req and req["status"] == "rejected":
-                await update.message.reply_text(
-                    "❌ Ваша заявка была отклонена.\n"
-                    "Если вы считаете это ошибкой — напишите @Hellylo."
-                )
-            else:
-                keyboard = InlineKeyboardMarkup([[
-                    InlineKeyboardButton("📩 Подать заявку", callback_data="send_request")
-                ]])
-                await update.message.reply_text(
-                    "🔒 У вас нет доступа к боту.\n\n"
-                    "Хотите получить доступ? Нажмите кнопку ниже — "
-                    "администратор получит вашу заявку и рассмотрит её.",
-                    reply_markup=keyboard,
-                )
+            keyboard = InlineKeyboardMarkup([[
+                InlineKeyboardButton("📩 Подать заявку", callback_data="send_request")
+            ]])
+            await update.message.reply_text(
+                "🔒 У вас нет доступа к боту.\n\n"
+                "Хотите получить доступ? Нажмите кнопку ниже — "
+                "администратор получит вашу заявку и рассмотрит её.",
+                reply_markup=keyboard,
+            )
         return
 
     if not db_user.get("seen_rules"):
@@ -168,14 +176,12 @@ async def handle_request_submit(update: Update, context: ContextTypes.DEFAULT_TY
         "Мы сообщим вам о решении прямо в этот чат."
     )
 
-    # notify all admins
     username_display = f"@{user.username}" if user.username else "нет username"
     admin_text = (
         f"📩 *Новая заявка на доступ*\n\n"
         f"👤 Имя: {user.full_name}\n"
         f"🔗 Username: {username_display}\n"
-        f"🆔 Telegram ID: `{user.id}`\n\n"
-        f"Чтобы добавить: `/adduser {user.id}`"
+        f"🆔 ID: `{user.id}`"
     )
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("✅ Принять", callback_data=f"req_accept:{user.id}"),
@@ -214,7 +220,7 @@ async def cmd_sub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except Exception as exc:
         logger.exception("Error in /sub for TG %d: %s", user_id, exc)
-        await update.message.reply_text(f"❌ Ошибка при получении подписки: {exc}")
+        await update.message.reply_text(f"❌ Ошибка при получении конфига: {exc}")
 
 
 # ── /info ─────────────────────────────────────────────────────────────────────

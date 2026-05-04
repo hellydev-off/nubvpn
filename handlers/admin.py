@@ -402,7 +402,36 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.info("Admin %d broadcast to %d users (%d failed)", caller_id, sent, failed)
 
 
-# ── /requests ─────────────────────────────────────────────────────────────────
+# ── /requests + callback ──────────────────────────────────────────────────────
+
+def _requests_text_and_keyboard(
+    pending: list[dict],
+) -> tuple[str, InlineKeyboardMarkup]:
+    if not pending:
+        return "📭 Нет ожидающих заявок.", InlineKeyboardMarkup([[
+            InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu"),
+        ]])
+
+    lines = [f"📋 *Заявки на доступ ({len(pending)})*\n"]
+    buttons: list[list[InlineKeyboardButton]] = []
+
+    for i, req in enumerate(pending, 1):
+        uname = f"@{req['tg_username']}" if req["tg_username"] else "без username"
+        name = req["full_name"] or "Без имени"
+        date = (req.get("created_at") or "")[:10]
+        lines.append(f"{i}\\. *{name}* \\({uname}\\)\n   🆔 `{req['telegram_id']}` · {date}")
+        buttons.append([
+            InlineKeyboardButton(
+                f"✅ {i}. Принять", callback_data=f"req_accept:{req['telegram_id']}"
+            ),
+            InlineKeyboardButton(
+                f"❌ {i}. Отклонить", callback_data=f"req_reject:{req['telegram_id']}"
+            ),
+        ])
+
+    buttons.append([InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")])
+    return "\n".join(lines), InlineKeyboardMarkup(buttons)
+
 
 async def cmd_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     caller_id = update.effective_user.id
@@ -411,83 +440,116 @@ async def cmd_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         return
 
     pending = await get_pending_requests()
-    if not pending:
-        await update.message.reply_text("📭 Нет ожидающих заявок.")
-        return
-
-    await update.message.reply_text(f"📋 *Заявки на доступ ({len(pending)})*", parse_mode="Markdown")
-
-    for req in pending:
-        username_display = f"@{req['tg_username']}" if req["tg_username"] else "нет username"
-        date = (req.get("created_at") or "")[:10]
-        text = (
-            f"👤 *{req['full_name'] or 'Без имени'}*\n"
-            f"🔗 {username_display}\n"
-            f"🆔 ID: `{req['telegram_id']}`\n"
-            f"📅 {date}\n\n"
-            f"Добавить: `/adduser {req['telegram_id']}`"
-        )
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton("✅ Принять", callback_data=f"req_accept:{req['telegram_id']}"),
-            InlineKeyboardButton("❌ Отклонить", callback_data=f"req_reject:{req['telegram_id']}"),
-        ]])
-        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    text, keyboard = _requests_text_and_keyboard(pending)
+    await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
 
 
 async def handle_request_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
-
     caller_id = query.from_user.id
+
     if not _is_admin(caller_id):
-        await query.edit_message_text("⛔ Нет доступа.")
+        await query.answer("⛔ Нет доступа.", show_alert=True)
         return
 
     action, raw_id = query.data.split(":")
     target_id = int(raw_id)
 
-    if action == "req_accept":
-        await update_request_status(target_id, "accepted")
-        await query.edit_message_text(
-            query.message.text + "\n\n✅ *Принято*",
-            parse_mode="Markdown",
-        )
-        try:
-            await context.bot.send_message(
-                chat_id=target_id,
-                text=(
-                    "✅ *Ваша заявка принята!*\n\n"
-                    "Администратор скоро выдаст вам доступ. "
-                    "Следите за этим чатом — как только доступ будет готов, "
-                    "просто напишите /start"
-                ),
-                parse_mode="Markdown",
-            )
-        except Exception as exc:
-            logger.warning("Failed to notify user %d on accept: %s", target_id, exc)
-        logger.info("Admin %d accepted request from TG %d", caller_id, target_id)
-
-    else:  # req_reject
+    if action == "req_reject":
+        await query.answer("Отклонено")
         await update_request_status(target_id, "rejected")
-        await query.edit_message_text(
-            query.message.text + "\n\n❌ *Отклонено*",
-            parse_mode="Markdown",
-        )
         try:
             await context.bot.send_message(
                 chat_id=target_id,
-                text=(
-                    "❌ *Ваша заявка отклонена.*\n\n"
-                    "Если вы считаете это ошибкой — напишите @Hellylo."
-                ),
+                text="❌ *Ваша заявка отклонена.*\n\nЕсли вы считаете это ошибкой — напишите @Hellylo.",
                 parse_mode="Markdown",
             )
         except Exception as exc:
             logger.warning("Failed to notify user %d on reject: %s", target_id, exc)
         logger.info("Admin %d rejected request from TG %d", caller_id, target_id)
+        # refresh the list
+        pending = await get_pending_requests()
+        text, keyboard = _requests_text_and_keyboard(pending)
+        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+        return
+
+    # req_accept — auto-create Marzban user and add to DB
+    await query.answer("Обрабатываю…")
+
+    req = await get_request(target_id)
+    if not req:
+        await query.answer("Заявка не найдена", show_alert=True)
+        return
+
+    existing = await get_user(target_id)
+    if existing:
+        await update_request_status(target_id, "accepted")
+        pending = await get_pending_requests()
+        text, keyboard = _requests_text_and_keyboard(pending)
+        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+        return
+
+    raw_username = req.get("tg_username") or f"id{target_id}"
+    marzban_username = re.sub(r"[^a-zA-Z0-9_-]", "_", raw_username)[:32]
+    if len(marzban_username) < 3:
+        marzban_username = f"id{target_id}"
+
+    client: MarzbanClient = context.bot_data["marzban"]
+    try:
+        try:
+            marzban_user = await client.get_user(marzban_username)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                marzban_user = await client.create_user(marzban_username)
+            else:
+                raise
+
+        link = client.vless_link(marzban_user)
+        note = req.get("full_name") or ""
+        await add_user(target_id, marzban_username, caller_id, note)
+        await update_request_status(target_id, "accepted")
+
+        try:
+            await context.bot.send_message(
+                chat_id=target_id,
+                text=(
+                    f"✅ *Доступ выдан\\!*\n\n"
+                    f"Ваш VLESS конфиг:\n`{link}`\n\n"
+                    "_Скопируйте и вставьте в VPN\\-клиент \\(v2rayNG, Hiddify, Streisand и др\\.\\)_"
+                ),
+                parse_mode="MarkdownV2",
+            )
+        except Exception as exc:
+            logger.warning("Failed to send config to user %d: %s", target_id, exc)
+
+        logger.info("Admin %d accepted & added TG %d → Marzban %s", caller_id, target_id, marzban_username)
+
+        pending = await get_pending_requests()
+        text, keyboard = _requests_text_and_keyboard(pending)
+        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+
+    except Exception as exc:
+        logger.exception("Error accepting request for %d: %s", target_id, exc)
+        await query.answer(f"Ошибка: {exc}", show_alert=True)
 
 
 # ── /mylink ───────────────────────────────────────────────────────────────────
+
+async def _send_mylink(marzban_username: str, client: MarzbanClient, reply_fn) -> None:
+    try:
+        mu = await client.get_user(marzban_username)
+        link = client.vless_link(mu)
+        status = mu.get("status", "unknown")
+        text = (
+            f"🔑 *VLESS конфиг для* `{marzban_username}`\n"
+            f"Статус: {_status_emoji(status)} {status}\n\n"
+            f"`{link}`"
+        )
+        await reply_fn(text, parse_mode="Markdown")
+    except Exception as exc:
+        logger.exception("Error in mylink: %s", exc)
+        await reply_fn(f"❌ Ошибка: {exc}")
+
 
 async def cmd_mylink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     caller_id = update.effective_user.id
@@ -495,7 +557,6 @@ async def cmd_mylink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await update.message.reply_text("⛔ Нет доступа.")
         return
 
-    # Если аргумент передан — используем его, иначе ищем в БД
     if context.args:
         marzban_username = context.args[0]
     else:
@@ -509,16 +570,105 @@ async def cmd_mylink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         marzban_username = db_user["marzban_username"]
 
     client: MarzbanClient = context.bot_data["marzban"]
+    await _send_mylink(marzban_username, client, update.message.reply_text)
+
+
+# ── admin menu callbacks ───────────────────────────────────────────────────────
+
+async def handle_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from handlers.user import admin_menu_keyboard
+    query = update.callback_query
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(
+        "👋 *Панель администратора*\n\nВыберите действие:",
+        parse_mode="Markdown",
+        reply_markup=admin_menu_keyboard(),
+    )
+
+
+async def handle_admin_requests_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    pending = await get_pending_requests()
+    text, keyboard = _requests_text_and_keyboard(pending)
+    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+
+
+async def handle_admin_listusers_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    page = int(query.data.split(":")[-1])
+    total = await count_users()
+    if total == 0:
+        await query.edit_message_text(
+            "📭 Пользователей пока нет.",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")
+            ]]),
+        )
+        return
+    users = await get_users_page(offset=page * PAGE_SIZE, limit=PAGE_SIZE)
+    text, keyboard = _build_list_page(users, page=page, total=total)
+    # append back button
+    rows = keyboard.inline_keyboard + [[InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")]]
+    await query.edit_message_text(
+        text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows)
+    )
+
+
+async def handle_admin_mylink_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    caller_id = query.from_user.id
+    if not _is_admin(caller_id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+
+    db_user = await get_user(caller_id)
+    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")]])
+
+    if not db_user:
+        await query.edit_message_text(
+            "Укажи marzban-юзернейм командой:\n`/mylink <marzban_username>`",
+            parse_mode="Markdown",
+            reply_markup=back_kb,
+        )
+        return
+
+    client: MarzbanClient = context.bot_data["marzban"]
     try:
-        mu = await client.get_user(marzban_username)
+        mu = await client.get_user(db_user["marzban_username"])
         link = client.vless_link(mu)
         status = mu.get("status", "unknown")
         text = (
-            f"🔑 *VLESS конфиг для* `{marzban_username}`\n"
+            f"🔑 *VLESS конфиг для* `{db_user['marzban_username']}`\n"
             f"Статус: {_status_emoji(status)} {status}\n\n"
             f"`{link}`"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=back_kb)
     except Exception as exc:
-        logger.exception("Error in /mylink: %s", exc)
-        await update.message.reply_text(f"❌ Ошибка: {exc}")
+        await query.edit_message_text(f"❌ Ошибка: {exc}", reply_markup=back_kb)
+
+
+async def handle_admin_broadcast_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(
+        "📢 *Рассылка*\n\nОтправьте команду:\n`/broadcast <текст сообщения>`",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")
+        ]]),
+    )
