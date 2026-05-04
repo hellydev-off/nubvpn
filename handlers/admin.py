@@ -390,19 +390,31 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("📭 Нет пользователей для рассылки.")
         return
 
-    sent, failed = 0, 0
+    sent, failed_list = 0, []
     for user in all_users:
         try:
             await context.bot.send_message(chat_id=user["telegram_id"], text=message)
             sent += 1
         except Exception as exc:
+            reason = str(exc)
             logger.warning("Broadcast failed for TG %d: %s", user["telegram_id"], exc)
-            failed += 1
+            failed_list.append((user["telegram_id"], user.get("marzban_username", "?"), reason))
 
-    await update.message.reply_text(
-        f"📣 Рассылка завершена: ✅ отправлено {sent}, ❌ ошибок {failed}."
-    )
-    logger.info("Admin %d broadcast to %d users (%d failed)", caller_id, sent, failed)
+    lines = [f"📣 <b>Рассылка завершена</b>: ✅ {sent} / {len(all_users)}"]
+    if failed_list:
+        lines.append(f"\n❌ <b>Не доставлено ({len(failed_list)}):</b>")
+        for tid, uname, reason in failed_list:
+            if "not found" in reason.lower() or "bot was blocked" in reason.lower():
+                hint = "не начал чат с ботом или заблокировал"
+            else:
+                hint = reason
+            lines.append(f"  • <code>{tid}</code> ({uname}) — {hint}")
+        lines.append(
+            "\n<i>💡 Пользователь получит сообщение только если сам писал боту хотя бы раз.</i>"
+        )
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    logger.info("Admin %d broadcast to %d users (%d failed)", caller_id, sent, len(failed_list))
 
 
 # ── /requests + callback ──────────────────────────────────────────────────────
