@@ -404,6 +404,11 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # ── /requests + callback ──────────────────────────────────────────────────────
 
+def _h(text: str) -> str:
+    """Escape HTML special chars for safe display."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _requests_text_and_keyboard(
     pending: list[dict],
 ) -> tuple[str, InlineKeyboardMarkup]:
@@ -412,21 +417,20 @@ def _requests_text_and_keyboard(
             InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu"),
         ]])
 
-    lines = [f"📋 *Заявки на доступ ({len(pending)})*\n"]
+    lines = [f"📋 <b>Заявки на доступ ({len(pending)})</b>\n"]
     buttons: list[list[InlineKeyboardButton]] = []
 
     for i, req in enumerate(pending, 1):
-        uname = f"@{req['tg_username']}" if req["tg_username"] else "без username"
-        name = req["full_name"] or "Без имени"
+        uname = f"@{_h(req['tg_username'])}" if req["tg_username"] else "без username"
+        name = _h(req["full_name"] or "Без имени")
         date = (req.get("created_at") or "")[:10]
-        lines.append(f"{i}\\. *{name}* \\({uname}\\)\n   🆔 `{req['telegram_id']}` · {date}")
+        lines.append(
+            f"{i}. <b>{name}</b> ({uname})\n"
+            f"   🆔 <code>{req['telegram_id']}</code> · {date}"
+        )
         buttons.append([
-            InlineKeyboardButton(
-                f"✅ {i}. Принять", callback_data=f"req_accept:{req['telegram_id']}"
-            ),
-            InlineKeyboardButton(
-                f"❌ {i}. Отклонить", callback_data=f"req_reject:{req['telegram_id']}"
-            ),
+            InlineKeyboardButton(f"✅ {i}. Принять",   callback_data=f"req_accept:{req['telegram_id']}"),
+            InlineKeyboardButton(f"❌ {i}. Отклонить", callback_data=f"req_reject:{req['telegram_id']}"),
         ])
 
     buttons.append([InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")])
@@ -441,7 +445,7 @@ async def cmd_requests(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     pending = await get_pending_requests()
     text, keyboard = _requests_text_and_keyboard(pending)
-    await update.message.reply_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def handle_request_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -470,7 +474,7 @@ async def handle_request_action(update: Update, context: ContextTypes.DEFAULT_TY
         # refresh the list
         pending = await get_pending_requests()
         text, keyboard = _requests_text_and_keyboard(pending)
-        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
         return
 
     # req_accept — auto-create Marzban user and add to DB
@@ -486,7 +490,7 @@ async def handle_request_action(update: Update, context: ContextTypes.DEFAULT_TY
         await update_request_status(target_id, "accepted")
         pending = await get_pending_requests()
         text, keyboard = _requests_text_and_keyboard(pending)
-        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
         return
 
     raw_username = req.get("tg_username") or f"id{target_id}"
@@ -513,11 +517,11 @@ async def handle_request_action(update: Update, context: ContextTypes.DEFAULT_TY
             await context.bot.send_message(
                 chat_id=target_id,
                 text=(
-                    f"✅ *Доступ выдан\\!*\n\n"
-                    f"Ваш VLESS конфиг:\n`{link}`\n\n"
-                    "_Скопируйте и вставьте в VPN\\-клиент \\(v2rayNG, Hiddify, Streisand и др\\.\\)_"
+                    f"✅ <b>Доступ выдан!</b>\n\n"
+                    f"Ваш VLESS конфиг:\n<code>{link}</code>\n\n"
+                    "<i>Скопируйте и вставьте в VPN-клиент (v2rayNG, Hiddify, Streisand и др.)</i>"
                 ),
-                parse_mode="MarkdownV2",
+                parse_mode="HTML",
             )
         except Exception as exc:
             logger.warning("Failed to send config to user %d: %s", target_id, exc)
@@ -526,7 +530,7 @@ async def handle_request_action(update: Update, context: ContextTypes.DEFAULT_TY
 
         pending = await get_pending_requests()
         text, keyboard = _requests_text_and_keyboard(pending)
-        await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
 
     except Exception as exc:
         logger.exception("Error accepting request for %d: %s", target_id, exc)
@@ -597,7 +601,7 @@ async def handle_admin_requests_callback(update: Update, context: ContextTypes.D
     await query.answer()
     pending = await get_pending_requests()
     text, keyboard = _requests_text_and_keyboard(pending)
-    await query.edit_message_text(text, parse_mode="MarkdownV2", reply_markup=keyboard)
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def handle_admin_listusers_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
