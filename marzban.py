@@ -65,11 +65,11 @@ class MarzbanClient:
         }
         return await self._request("POST", "/api/user", json=payload)
 
-    def full_subscription_url(self, user: dict[str, Any]) -> str:
-        sub = user.get("subscription_url", "")
-        if sub.startswith("http"):
-            return sub
-        return f"{self._base_url}{sub}"
+    def vless_link(self, user: dict[str, Any]) -> str:
+        for link in user.get("links", []):
+            if link.startswith("vless://"):
+                return link
+        return "N/A"
 
     async def delete_user(self, username: str) -> None:
         await self._request("DELETE", f"/api/user/{username}")

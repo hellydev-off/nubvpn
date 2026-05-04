@@ -205,11 +205,11 @@ async def cmd_sub(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     client: MarzbanClient = context.bot_data["marzban"]
     try:
         mu = await client.get_user(db_user["marzban_username"])
-        sub_url = client.full_subscription_url(mu)
+        link = client.vless_link(mu)
         await update.message.reply_text(
-            f"Ваша ссылка на подписку:\n`{sub_url}`\n\n"
-            "_Скопируйте эту ссылку и добавьте в ваш VPN-клиент "
-            "(Hiddify, Streisand, v2rayNG и др.)_",
+            f"Ваш VLESS конфиг:\n`{link}`\n\n"
+            "_Скопируйте и вставьте в ваш VPN-клиент "
+            "(v2rayNG, Hiddify, Streisand и др.)_",
             parse_mode="Markdown",
         )
     except Exception as exc:

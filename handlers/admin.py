@@ -109,7 +109,7 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             else:
                 raise
 
-        sub_url = client.full_subscription_url(marzban_user)
+        link = client.vless_link(marzban_user)
         await add_user(target_id, marzban_username, caller_id, note)
 
         tg_name = f"@{req['tg_username']}" if req and req.get("tg_username") else str(target_id)
@@ -119,7 +119,7 @@ async def cmd_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             f"ID: `{target_id}`\n"
             f"Marzban: `{marzban_username}`\n"
             f"Заметка: {note or '—'}\n\n"
-            f"Ссылка на подписку:\n`{sub_url}`"
+            f"VLESS конфиг:\n`{link}`"
         )
         await update.message.reply_text(text, parse_mode="MarkdownV2")
         logger.info("Admin %d added TG %d → Marzban %s", caller_id, target_id, marzban_username)
@@ -511,12 +511,12 @@ async def cmd_mylink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     client: MarzbanClient = context.bot_data["marzban"]
     try:
         mu = await client.get_user(marzban_username)
-        sub_url = client.full_subscription_url(mu)
+        link = client.vless_link(mu)
         status = mu.get("status", "unknown")
         text = (
-            f"🔑 *Ссылка для* `{marzban_username}`\n"
+            f"🔑 *VLESS конфиг для* `{marzban_username}`\n"
             f"Статус: {_status_emoji(status)} {status}\n\n"
-            f"`{sub_url}`"
+            f"`{link}`"
         )
         await update.message.reply_text(text, parse_mode="Markdown")
     except Exception as exc:
