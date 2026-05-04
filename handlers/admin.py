@@ -270,10 +270,13 @@ def _build_list_page(
     start = page * PAGE_SIZE + 1
     end = min(start + PAGE_SIZE - 1, total)
 
-    lines = [f"*👥 Пользователи ({start}–{end} из {total})*\n"]
+    lines = [f"<b>👥 Пользователи ({start}–{end} из {total})</b>\n"]
     for u in users:
-        note = u.get("note") or "—"
-        lines.append(f"`{u['telegram_id']}` | `{u['marzban_username']}` | {note}")
+        note = _h(u.get("note") or "—")
+        lines.append(
+            f"<code>{u['telegram_id']}</code> | "
+            f"<code>{_h(u['marzban_username'])}</code> | {note}"
+        )
     lines.append(f"\nСтраница {page + 1}/{total_pages}")
 
     buttons: list[InlineKeyboardButton] = []
@@ -286,7 +289,7 @@ def _build_list_page(
             InlineKeyboardButton("Вперёд ▶", callback_data=f"listusers:page:{page + 1}")
         )
 
-    keyboard = InlineKeyboardMarkup([buttons]) if buttons else InlineKeyboardMarkup([[]])
+    keyboard = InlineKeyboardMarkup([buttons]) if buttons else InlineKeyboardMarkup([])
     return "\n".join(lines), keyboard
 
 
@@ -303,7 +306,7 @@ async def cmd_listusers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     users = await get_users_page(offset=0, limit=PAGE_SIZE)
     text, keyboard = _build_list_page(users, page=0, total=total)
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 async def handle_list_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -319,7 +322,7 @@ async def handle_list_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     total = await count_users()
     users = await get_users_page(offset=page * PAGE_SIZE, limit=PAGE_SIZE)
     text, keyboard = _build_list_page(users, page=page, total=total)
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=keyboard)
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
 
 
 # ── /resettraffic ─────────────────────────────────────────────────────────────
@@ -622,10 +625,10 @@ async def handle_admin_listusers_callback(update: Update, context: ContextTypes.
         return
     users = await get_users_page(offset=page * PAGE_SIZE, limit=PAGE_SIZE)
     text, keyboard = _build_list_page(users, page=page, total=total)
-    # append back button
-    rows = keyboard.inline_keyboard + [[InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")]]
+    existing_rows = [row for row in keyboard.inline_keyboard if row]
+    rows = existing_rows + [[InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")]]
     await query.edit_message_text(
-        text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows)
+        text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(rows)
     )
 
 
