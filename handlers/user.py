@@ -69,12 +69,16 @@ def _welcome_text(note: str | None) -> str:
 def admin_menu_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📩 Заявки", callback_data="admin_requests"),
+            InlineKeyboardButton("📩 Заявки",       callback_data="admin_requests"),
             InlineKeyboardButton("👥 Пользователи", callback_data="admin_listusers:0"),
         ],
         [
-            InlineKeyboardButton("🔑 Моя ссылка", callback_data="admin_mylink"),
-            InlineKeyboardButton("📢 Рассылка", callback_data="admin_broadcast"),
+            InlineKeyboardButton("📊 Статистика",   callback_data="admin_stats"),
+            InlineKeyboardButton("🟢 Онлайн",       callback_data="admin_online"),
+        ],
+        [
+            InlineKeyboardButton("🔑 Моя ссылка",   callback_data="admin_mylink"),
+            InlineKeyboardButton("📢 Рассылка",     callback_data="admin_broadcast"),
         ],
     ])
 

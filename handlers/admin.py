@@ -45,17 +45,51 @@ def _fmt_bytes(b: int | None) -> str:
 
 
 def _fmt_limit(b: int | None) -> str:
-    return "Unlimited" if not b else _fmt_bytes(b)
+    return "Без лимита" if not b else _fmt_bytes(b)
 
 
 def _fmt_expire(ts: int | None) -> str:
     if ts is None:
-        return "Never"
+        return "Бессрочно"
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
 def _status_emoji(status: str) -> str:
     return _STATUS_EMOJI.get(status, "❓")
+
+
+def _time_ago(ts: str | int | None) -> str:
+    if ts is None:
+        return "никогда"
+    try:
+        if isinstance(ts, (int, float)):
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        else:
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return str(ts)
+    diff = int((datetime.now(timezone.utc) - dt).total_seconds())
+    if diff < 60:
+        return "только что"
+    if diff < 3600:
+        return f"{diff // 60} мин. назад"
+    if diff < 86400:
+        return f"{diff // 3600} ч. назад"
+    if diff < 86400 * 30:
+        return f"{diff // 86400} дн. назад"
+    return dt.strftime("%Y-%m-%d")
+
+
+def _fmt_client(agent: str | None) -> str:
+    if not agent:
+        return "неизвестно"
+    # shorten long UA strings
+    for app in ("v2rayNG", "Hiddify", "Streisand", "Nekoray", "Clash", "sing-box", "Shadowrocket"):
+        if app.lower() in agent.lower():
+            return app
+    return agent[:30]
 
 
 # ── /adduser ──────────────────────────────────────────────────────────────────
@@ -244,18 +278,22 @@ async def cmd_userinfo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     try:
         mu = await client.get_user(db_user["marzban_username"])
         status = mu.get("status", "unknown")
+        status = mu.get("status", "unknown")
         text = (
-            f"*Информация о пользователе*\n"
-            f"Telegram ID: `{target_id}`\n"
-            f"Marzban: `{mu.get('username')}`\n"
-            f"Заметка: {db_user.get('note') or '—'}\n"
-            f"Статус: {_status_emoji(status)} {status}\n"
-            f"Трафик: {_fmt_bytes(mu.get('used_traffic'))} / {_fmt_limit(mu.get('data_limit'))}\n"
-            f"Истекает: {_fmt_expire(mu.get('expire'))}\n"
-            f"Добавил: `{db_user.get('added_by')}`\n"
+            f"<b>ℹ️ Информация о пользователе</b>\n\n"
+            f"Telegram ID: <code>{target_id}</code>\n"
+            f"Marzban: <code>{_h(mu.get('username', ''))}</code>\n"
+            f"Заметка: {_h(db_user.get('note') or '—')}\n\n"
+            f"{_status_emoji(status)} <b>Статус:</b> {status}\n"
+            f"📊 <b>Трафик:</b> {_fmt_bytes(mu.get('used_traffic'))} / {_fmt_limit(mu.get('data_limit'))}\n"
+            f"📅 <b>Истекает:</b> {_fmt_expire(mu.get('expire'))}\n"
+            f"🕐 <b>Онлайн:</b> {_time_ago(mu.get('online_at'))}\n"
+            f"📱 <b>Клиент:</b> {_h(_fmt_client(mu.get('sub_last_user_agent')))}\n"
+            f"🔄 <b>Подписка обновлена:</b> {_time_ago(mu.get('sub_updated_at'))}\n\n"
+            f"Добавил: <code>{db_user.get('added_by')}</code>\n"
             f"Дата добавления: {(db_user.get('added_at') or '')[:10]}"
         )
-        await update.message.reply_text(text, parse_mode="Markdown")
+        await update.message.reply_text(text, parse_mode="HTML")
     except Exception as exc:
         logger.exception("Error in /userinfo: %s", exc)
         await update.message.reply_text(f"❌ Ошибка: {exc}")
@@ -415,6 +453,137 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
     logger.info("Admin %d broadcast to %d users (%d failed)", caller_id, sent, len(failed_list))
+
+
+# ── /stats ────────────────────────────────────────────────────────────────────
+
+async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    caller_id = update.effective_user.id
+    if not _is_admin(caller_id):
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    db_users = await get_all_users()
+    if not db_users:
+        await update.message.reply_text("📭 Пользователей нет.")
+        return
+
+    client: MarzbanClient = context.bot_data["marzban"]
+    rows: list[dict] = []
+    for u in db_users:
+        try:
+            mu = await client.get_user(u["marzban_username"])
+            rows.append({
+                "telegram_id": u["telegram_id"],
+                "username": mu.get("username", u["marzban_username"]),
+                "note": u.get("note") or "",
+                "status": mu.get("status", "unknown"),
+                "used": mu.get("used_traffic") or 0,
+                "limit": mu.get("data_limit") or 0,
+                "online_at": mu.get("online_at"),
+                "client": _fmt_client(mu.get("sub_last_user_agent")),
+            })
+        except Exception:
+            rows.append({
+                "telegram_id": u["telegram_id"],
+                "username": u["marzban_username"],
+                "note": u.get("note") or "",
+                "status": "unknown",
+                "used": 0, "limit": 0,
+                "online_at": None, "client": "?",
+            })
+
+    rows.sort(key=lambda r: r["used"], reverse=True)
+    total_used = sum(r["used"] for r in rows)
+
+    lines = [f"<b>📊 Статистика трафика ({len(rows)} польз.)</b>\n"]
+    for i, r in enumerate(rows, 1):
+        bar = "█" * min(10, int(r["used"] / max(total_used, 1) * 10)) if total_used else ""
+        note = f" · {_h(r['note'])}" if r["note"] else ""
+        lines.append(
+            f"{i}. {_status_emoji(r['status'])} <code>{_h(r['username'])}</code>{note}\n"
+            f"   {_fmt_bytes(r['used'])} / {_fmt_limit(r['limit'])}  {bar}\n"
+            f"   🕐 {_time_ago(r['online_at'])}  📱 {_h(r['client'])}"
+        )
+
+    lines.append(f"\n<b>Итого:</b> {_fmt_bytes(total_used)}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+# ── /online ────────────────────────────────────────────────────────────────────
+
+async def cmd_online(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    caller_id = update.effective_user.id
+    if not _is_admin(caller_id):
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    db_users = await get_all_users()
+    if not db_users:
+        await update.message.reply_text("📭 Пользователей нет.")
+        return
+
+    client: MarzbanClient = context.bot_data["marzban"]
+    now = datetime.now(timezone.utc)
+    online_rows: list[tuple] = []
+
+    for u in db_users:
+        try:
+            mu = await client.get_user(u["marzban_username"])
+            ts = mu.get("online_at")
+            if ts is None:
+                continue
+            try:
+                dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+            except Exception:
+                continue
+            diff = (now - dt).total_seconds()
+            online_rows.append((diff, mu.get("username", u["marzban_username"]),
+                                 mu.get("status", "unknown"),
+                                 _fmt_client(mu.get("sub_last_user_agent")),
+                                 _fmt_bytes(mu.get("used_traffic") or 0)))
+        except Exception:
+            continue
+
+    online_rows.sort(key=lambda r: r[0])
+
+    if not online_rows:
+        await update.message.reply_text("😴 Никто не был онлайн (данных нет).")
+        return
+
+    h24 = [r for r in online_rows if r[0] <= 86400]
+    older = [r for r in online_rows if r[0] > 86400]
+
+    lines = [f"<b>🟢 Активность пользователей</b>\n"]
+    if h24:
+        lines.append("<b>За последние 24ч:</b>")
+        for diff, uname, status, client_app, traffic in h24:
+            lines.append(
+                f"  {_status_emoji(status)} <code>{_h(uname)}</code> — "
+                f"{_time_ago_s(diff)}  📱 {_h(client_app)}  📊 {traffic}"
+            )
+    if older:
+        lines.append("\n<b>Ранее:</b>")
+        for diff, uname, status, client_app, traffic in older:
+            lines.append(
+                f"  {_status_emoji(status)} <code>{_h(uname)}</code> — "
+                f"{_time_ago_s(diff)}"
+            )
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+def _time_ago_s(seconds: float) -> str:
+    s = int(seconds)
+    if s < 60:
+        return "только что"
+    if s < 3600:
+        return f"{s // 60} мин. назад"
+    if s < 86400:
+        return f"{s // 3600} ч. назад"
+    return f"{s // 86400} дн. назад"
 
 
 # ── /requests + callback ──────────────────────────────────────────────────────
@@ -691,3 +860,108 @@ async def handle_admin_broadcast_callback(update: Update, context: ContextTypes.
             InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")
         ]]),
     )
+
+
+async def handle_admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer("Загружаю статистику…")
+    await query.edit_message_text("⏳ Загружаю данные…")
+
+    db_users = await get_all_users()
+    client: MarzbanClient = context.bot_data["marzban"]
+    rows: list[dict] = []
+    for u in db_users:
+        try:
+            mu = await client.get_user(u["marzban_username"])
+            rows.append({
+                "username": mu.get("username", u["marzban_username"]),
+                "note": u.get("note") or "",
+                "status": mu.get("status", "unknown"),
+                "used": mu.get("used_traffic") or 0,
+                "limit": mu.get("data_limit") or 0,
+                "online_at": mu.get("online_at"),
+                "client": _fmt_client(mu.get("sub_last_user_agent")),
+            })
+        except Exception:
+            rows.append({"username": u["marzban_username"], "note": u.get("note") or "",
+                         "status": "unknown", "used": 0, "limit": 0,
+                         "online_at": None, "client": "?"})
+
+    rows.sort(key=lambda r: r["used"], reverse=True)
+    total_used = sum(r["used"] for r in rows)
+
+    lines = [f"<b>📊 Статистика трафика ({len(rows)} польз.)</b>\n"]
+    for i, r in enumerate(rows, 1):
+        bar = "█" * min(10, int(r["used"] / max(total_used, 1) * 10)) if total_used else ""
+        note = f" · {_h(r['note'])}" if r["note"] else ""
+        lines.append(
+            f"{i}. {_status_emoji(r['status'])} <code>{_h(r['username'])}</code>{note}\n"
+            f"   {_fmt_bytes(r['used'])} / {_fmt_limit(r['limit'])}  {bar}\n"
+            f"   🕐 {_time_ago(r['online_at'])}  📱 {_h(r['client'])}"
+        )
+    lines.append(f"\n<b>Итого:</b> {_fmt_bytes(total_used)}")
+
+    await query.edit_message_text(
+        "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")]]),
+    )
+
+
+async def handle_admin_online_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text("⏳ Загружаю данные…")
+
+    db_users = await get_all_users()
+    client: MarzbanClient = context.bot_data["marzban"]
+    now = datetime.now(timezone.utc)
+    online_rows: list[tuple] = []
+
+    for u in db_users:
+        try:
+            mu = await client.get_user(u["marzban_username"])
+            ts = mu.get("online_at")
+            if ts is None:
+                continue
+            dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            diff = (now - dt).total_seconds()
+            online_rows.append((diff, mu.get("username", u["marzban_username"]),
+                                 mu.get("status", "unknown"),
+                                 _fmt_client(mu.get("sub_last_user_agent")),
+                                 _fmt_bytes(mu.get("used_traffic") or 0)))
+        except Exception:
+            continue
+
+    back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Меню", callback_data="admin_menu")]])
+
+    if not online_rows:
+        await query.edit_message_text("😴 Данных об активности нет.", reply_markup=back_kb)
+        return
+
+    online_rows.sort(key=lambda r: r[0])
+    h24 = [r for r in online_rows if r[0] <= 86400]
+    older = [r for r in online_rows if r[0] > 86400]
+
+    lines = ["<b>🟢 Активность пользователей</b>\n"]
+    if h24:
+        lines.append("<b>За последние 24ч:</b>")
+        for diff, uname, status, client_app, traffic in h24:
+            lines.append(
+                f"  {_status_emoji(status)} <code>{_h(uname)}</code> — "
+                f"{_time_ago_s(diff)}  📱 {_h(client_app)}  📊 {traffic}"
+            )
+    if older:
+        lines.append("\n<b>Ранее:</b>")
+        for diff, uname, status, client_app, traffic in older:
+            lines.append(f"  {_status_emoji(status)} <code>{_h(uname)}</code> — {_time_ago_s(diff)}")
+
+    await query.edit_message_text("\n".join(lines), parse_mode="HTML", reply_markup=back_kb)

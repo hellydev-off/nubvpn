@@ -14,15 +14,19 @@ from handlers.admin import (
     cmd_broadcast,
     cmd_listusers,
     cmd_mylink,
+    cmd_online,
     cmd_removeuser,
     cmd_requests,
     cmd_resettraffic,
+    cmd_stats,
     cmd_userinfo,
     handle_admin_broadcast_callback,
     handle_admin_listusers_callback,
     handle_admin_menu,
     handle_admin_mylink_callback,
+    handle_admin_online_callback,
     handle_admin_requests_callback,
+    handle_admin_stats_callback,
     handle_list_callback,
     handle_remove_callback,
     handle_request_action,
@@ -75,6 +79,8 @@ def main() -> None:
     app.add_handler(CommandHandler("listusers", cmd_listusers))
     app.add_handler(CommandHandler("resettraffic", cmd_resettraffic))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
+    app.add_handler(CommandHandler("stats", cmd_stats))
+    app.add_handler(CommandHandler("online", cmd_online))
 
     # User commands
     app.add_handler(CommandHandler("start", cmd_start))
@@ -92,6 +98,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_admin_listusers_callback,   pattern=r"^admin_listusers:\d+$"))
     app.add_handler(CallbackQueryHandler(handle_admin_mylink_callback,      pattern=r"^admin_mylink$"))
     app.add_handler(CallbackQueryHandler(handle_admin_broadcast_callback,   pattern=r"^admin_broadcast$"))
+    app.add_handler(CallbackQueryHandler(handle_admin_stats_callback,       pattern=r"^admin_stats$"))
+    app.add_handler(CallbackQueryHandler(handle_admin_online_callback,      pattern=r"^admin_online$"))
 
     logger.info("Bot starting…")
     app.run_polling(drop_pending_updates=True)
