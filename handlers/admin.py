@@ -22,6 +22,10 @@ ADMIN_IDS: frozenset[int] = frozenset(
     int(x.strip()) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()
 )
 PAGE_SIZE = 10
+XRAY_LOG = "/var/lib/marzban/access.log"
+_LOG_RE = re.compile(
+    r"^(\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) from ([\d.:a-fA-F]+):\d+ \S+ \S+ \[[^\]]+\] email: \d+\.(\S+)$"
+)
 
 _STATUS_EMOJI = {
     "active": "🟢",
@@ -293,7 +297,10 @@ async def cmd_userinfo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             f"Добавил: <code>{db_user.get('added_by')}</code>\n"
             f"Дата добавления: {(db_user.get('added_at') or '')[:10]}"
         )
-        await update.message.reply_text(text, parse_mode="HTML")
+        kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📱 Устройства / IP", callback_data=f"devices:{target_id}")
+        ]])
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
     except Exception as exc:
         logger.exception("Error in /userinfo: %s", exc)
         await update.message.reply_text(f"❌ Ошибка: {exc}")
@@ -759,6 +766,118 @@ async def cmd_mylink(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     client: MarzbanClient = context.bot_data["marzban"]
     await _send_mylink(marzban_username, client, update.message.reply_text)
+
+
+# ── /devices ─────────────────────────────────────────────────────────────────
+
+def _parse_access_log(marzban_username: str, max_lines: int = 300_000) -> dict[str, dict]:
+    """Return {ip: {count, first, last}} from Xray access log for one user."""
+    result: dict[str, dict] = {}
+    try:
+        with open(XRAY_LOG, "r", errors="ignore") as f:
+            lines = f.readlines()[-max_lines:]
+    except FileNotFoundError:
+        return {}
+    uname_lower = marzban_username.lower()
+    for line in lines:
+        m = _LOG_RE.match(line.strip())
+        if not m:
+            continue
+        ts_str, ip, email = m.group(1), m.group(2), m.group(3)
+        if email.lower() != uname_lower:
+            continue
+        try:
+            dt = datetime.strptime(ts_str, "%Y/%m/%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if ip not in result:
+            result[ip] = {"count": 0, "first": dt, "last": dt}
+        result[ip]["count"] += 1
+        if dt < result[ip]["first"]:
+            result[ip]["first"] = dt
+        if dt > result[ip]["last"]:
+            result[ip]["last"] = dt
+    return result
+
+
+async def cmd_devices(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    caller_id = update.effective_user.id
+    if not _is_admin(caller_id):
+        await update.message.reply_text("⛔ Нет доступа.")
+        return
+
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Использование: <code>/devices &lt;telegram_id&gt;</code>", parse_mode="HTML"
+        )
+        return
+
+    try:
+        target_id = int(args[0])
+    except ValueError:
+        await update.message.reply_text("❌ telegram_id должен быть числом.")
+        return
+
+    db_user = await get_user(target_id)
+    if not db_user:
+        await update.message.reply_text(
+            f"❌ Пользователь <code>{target_id}</code> не найден.", parse_mode="HTML"
+        )
+        return
+
+    await update.message.reply_text("⏳ Анализирую лог…")
+    await _send_devices(db_user["marzban_username"], update.message.reply_text)
+
+
+async def handle_devices_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not _is_admin(query.from_user.id):
+        await query.answer("⛔ Нет доступа.", show_alert=True)
+        return
+    await query.answer("Анализирую лог…")
+
+    target_id = int(query.data.split(":")[1])
+    db_user = await get_user(target_id)
+    if not db_user:
+        await query.answer("Пользователь не найден.", show_alert=True)
+        return
+
+    await _send_devices(db_user["marzban_username"], query.message.reply_text)
+
+
+async def _send_devices(marzban_username: str, reply_fn) -> None:
+    ips = _parse_access_log(marzban_username)
+
+    if not ips:
+        await reply_fn(
+            f"📭 Нет данных о подключениях для <code>{_h(marzban_username)}</code>.\n"
+            "<i>Лог пишется с момента последнего запуска Xray.</i>",
+            parse_mode="HTML",
+        )
+        return
+
+    sorted_ips = sorted(ips.items(), key=lambda x: x[1]["last"], reverse=True)
+    total_conn = sum(d["count"] for d in ips.values())
+
+    lines = [
+        f"📱 <b>Подключения для</b> <code>{_h(marzban_username)}</code>\n"
+        f"Уникальных IP: <b>{len(sorted_ips)}</b>  ·  Всего соединений: <b>{total_conn}</b>"
+    ]
+
+    if len(sorted_ips) > 1:
+        lines.append(f"\n⚠️ <b>{len(sorted_ips)} разных IP — возможна раздача ссылки!</b>")
+
+    for ip, data in sorted_ips:
+        lines.append(
+            f"\n🔹 <code>{ip}</code>\n"
+            f"   Соединений: {data['count']}\n"
+            f"   Первый раз: {data['first'].strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"   Последний раз: {data['last'].strftime('%Y-%m-%d %H:%M UTC')}"
+        )
+
+    lines.append("\n<i>Данные из лога Xray с момента последнего перезапуска.</i>")
+    await reply_fn("\n".join(lines), parse_mode="HTML")
 
 
 # ── admin menu callbacks ───────────────────────────────────────────────────────

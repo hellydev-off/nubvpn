@@ -12,6 +12,7 @@ from db import init_db
 from handlers.admin import (
     cmd_adduser,
     cmd_broadcast,
+    cmd_devices,
     cmd_listusers,
     cmd_mylink,
     cmd_online,
@@ -27,6 +28,7 @@ from handlers.admin import (
     handle_admin_online_callback,
     handle_admin_requests_callback,
     handle_admin_stats_callback,
+    handle_devices_callback,
     handle_list_callback,
     handle_remove_callback,
     handle_request_action,
@@ -81,6 +83,7 @@ def main() -> None:
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("online", cmd_online))
+    app.add_handler(CommandHandler("devices", cmd_devices))
 
     # User commands
     app.add_handler(CommandHandler("start", cmd_start))
@@ -100,6 +103,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(handle_admin_broadcast_callback,   pattern=r"^admin_broadcast$"))
     app.add_handler(CallbackQueryHandler(handle_admin_stats_callback,       pattern=r"^admin_stats$"))
     app.add_handler(CallbackQueryHandler(handle_admin_online_callback,      pattern=r"^admin_online$"))
+    app.add_handler(CallbackQueryHandler(handle_devices_callback,           pattern=r"^devices:\d+$"))
 
     logger.info("Bot starting…")
     app.run_polling(drop_pending_updates=True)
